@@ -1,206 +1,183 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
-#include "background.h"
+#include <SDL2/SDL_mixer.h>
+#include <stdio.h>
+#include "game_state.h"
+#include "img_button.h"
+#include "main_menu.h"
+#include "options_menu.h"
+#include "utils.h"
+#include "player.h"
+#include "level.h"
+#include "platform.h"
+#include "minimap.h"
+#include "save_menu.h"
+#include "gameplay_state.h"
 
-#define SCREEN_W 1920
-#define SCREEN_H 1080
-#define PLAYER_SPD 10
-#define SCORE_INTERVAL 3
+typedef struct {
+    SDL_Window *window;
+    SDL_Renderer *renderer;
+    StateManager state;
+    MainMenu mainMenu;
+    OptionsMenu optionsMenu;
+    GameplayState gameplay;
+    int gameplayInitialized;
+    int windowFocused;
+} Game;
 
-int main()
-{
-    SDL_Init(SDL_INIT_VIDEO);
-    IMG_Init(IMG_INIT_PNG);
-
-    SDL_Window *win = SDL_CreateWindow(
-        "Game",
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        SCREEN_W,
-        SCREEN_H,
-        0
-    );
-
-    SDL_Renderer *renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
-
-    Background bg;
-    initBackground(&bg, renderer, SCREEN_W, SCREEN_H);
-    initTemps(&bg);
-
-    SDL_Surface *guideSurf = IMG_Load("images/guideimage.png");
-    SDL_Texture *guideTex = NULL;
-
-    if (guideSurf)
-    {
-        guideTex = SDL_CreateTextureFromSurface(renderer, guideSurf);
-        SDL_FreeSurface(guideSurf);
+int initSDL(Game *g) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+        SDL_Log("SDL_Init error: %s", SDL_GetError());
+        return 0;
     }
-
-    SDL_Rect p1 = {300,620,50,50};
-    SDL_Rect p2 = {300,620,50,50};
-
-    SDL_Color c1 = {0, 255, 0, 255};
-    SDL_Color c2 = {0, 100, 255, 255};
-
-    int twoPlayer = 0;
-    int lastScoreTick = 0;
-    int quit = 0;
-
-    SDL_Event e;
-
-    while (!quit)
-    {
-        while (SDL_PollEvent(&e))
-        {
-            if (e.type == SDL_QUIT)
-                quit = 1;
-
-            if (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_p)
-                twoPlayer = !twoPlayer;
-        }
-
-        const Uint8 *ks = SDL_GetKeyboardState(NULL);
-
-        int elapsed = getElapsedSeconds(&bg);
-        int scoreTick = elapsed / SCORE_INTERVAL;
-
-        if (scoreTick > lastScoreTick)
-        {
-            bg.score += scoreTick - lastScoreTick;
-            lastScoreTick = scoreTick;
-        }
-
-        if (!bg.finJeu)
-        {
-            if (ks[SDL_SCANCODE_RIGHT])
-                scrolling(&bg, PLAYER_SPD);
-
-            if (ks[SDL_SCANCODE_LEFT])
-                scrolling(&bg, -PLAYER_SPD);
-
-            if (ks[SDL_SCANCODE_UP])
-            {
-                p1.y -= PLAYER_SPD;
-                if (p1.y < 0) p1.y = 0;
-            }
-
-            if (ks[SDL_SCANCODE_DOWN])
-            {
-                p1.y += PLAYER_SPD;
-                if (p1.y > SCREEN_H - p1.h)
-                    p1.y = SCREEN_H - p1.h;
-            }
-
-            if (bg.level == 1 && bg.scrollAbsoluX > bg.largeurNiveau * 1.75)
-            {
-                loadLevel(&bg, renderer, 2);
-                bg.scrollAbsoluX = 0;
-            }
-            else if (bg.level == 2 && bg.scrollAbsoluX > bg.largeurNiveau)
-            {
-                bg.finJeu = 1;
-            }
-        }
-
-       if (twoPlayer)
-{
     
-    if (ks[SDL_SCANCODE_UP])
-        p1.y -= PLAYER_SPD;
-
-    if (ks[SDL_SCANCODE_DOWN])
-        p1.y += PLAYER_SPD;
-
-    if (ks[SDL_SCANCODE_LEFT])
-        p1.x -= PLAYER_SPD;
-
-    if (ks[SDL_SCANCODE_RIGHT])
-        p1.x += PLAYER_SPD;
-
-    if (p1.x < 0) p1.x = 0;
-    if (p1.y < 0) p1.y = 0;
-    if (p1.x > SCREEN_W - p1.w) p1.x = SCREEN_W - p1.w;
-    if (p1.y > SCREEN_H - p1.h) p1.y = SCREEN_H - p1.h;
-
-    /* PLAYER 2 (BLUE) */
-    if (ks[SDL_SCANCODE_D]) p2.x += PLAYER_SPD;
-    if (ks[SDL_SCANCODE_A]) p2.x -= PLAYER_SPD;
-    if (ks[SDL_SCANCODE_W]) p2.y -= PLAYER_SPD;
-    if (ks[SDL_SCANCODE_S]) p2.y += PLAYER_SPD;
-
-    if (p2.x < 0) p2.x = 0;
-    if (p2.y < 0) p2.y = 0;
-    if (p2.x > SCREEN_W - p2.w) p2.x = SCREEN_W - p2.w;
-    if (p2.y > SCREEN_H - p2.h) p2.y = SCREEN_H - p2.h;
+    if (!(IMG_Init(IMG_INIT_JPG | IMG_INIT_PNG) & (IMG_INIT_JPG | IMG_INIT_PNG))) {
+        SDL_Log("IMG_Init error: %s", IMG_GetError());
+        return 0;
+    }
+    
+    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) != 0) {
+        SDL_Log("Mix_OpenAudio error: %s", Mix_GetError());
+        return 0;
+    }
+    
+    g->window = SDL_CreateWindow("Platform Game - Level 2 Edition",
+        SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+        650, 350, SDL_WINDOW_SHOWN);
+    if (!g->window) return 0;
+    
+    printf("Fenetre cree: 650x350\n");
+    
+    g->renderer = SDL_CreateRenderer(g->window, -1, SDL_RENDERER_SOFTWARE);
+    
+    if (!g->renderer) {
+        printf("ERREUR: %s\n", SDL_GetError());
+        return 0;
+    }
+    
+    g->windowFocused = 1;
+    
+    return 1;
 }
 
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-        SDL_RenderClear(renderer);
-
-        if (!twoPlayer)
-        {
-            SDL_RenderSetViewport(renderer, NULL);
-
-            afficherBackground(&bg, renderer, SCREEN_W, SCREEN_H);
-            afficherTemps(&bg, renderer, 0);
-            afficherScore(&bg, renderer, 0);
-
-            SDL_SetRenderDrawColor(renderer, c1.r, c1.g, c1.b, c1.a);
-            SDL_RenderFillRect(renderer, &p1);
-        }
-        else
-        {
-            int halfW = SCREEN_W / 2;
-
-            SDL_RenderSetViewport(renderer, &(SDL_Rect){0, 0, halfW, SCREEN_H});
-            SDL_RenderCopy(renderer, bg.image, &bg.camera,
-                           &(SDL_Rect){0, 0, halfW, SCREEN_H});
-
-            afficherTemps(&bg, renderer, 0);
-            afficherScore(&bg, renderer, 0);
-
-            SDL_SetRenderDrawColor(renderer, c1.r, c1.g, c1.b, c1.a);
-            SDL_RenderFillRect(renderer,
-                               &(SDL_Rect){p1.x * halfW / SCREEN_W, p1.y, p1.w, p1.h});
-
-            SDL_RenderSetViewport(renderer, &(SDL_Rect){halfW, 0, halfW, SCREEN_H});
-            SDL_RenderCopy(renderer, bg.image, &bg.camera,
-                           &(SDL_Rect){0, 0, halfW, SCREEN_H});
-
-            afficherTemps(&bg, renderer, 0);
-            afficherScore(&bg, renderer, 0);
-
-            SDL_SetRenderDrawColor(renderer, c2.r, c2.g, c2.b, c2.a);
-            SDL_RenderFillRect(renderer,
-                               &(SDL_Rect){p2.x * halfW / SCREEN_W, p2.y, p2.w, p2.h});
-
-            SDL_RenderSetViewport(renderer, NULL);
-            SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-            SDL_RenderDrawLine(renderer, halfW, 0, halfW, SCREEN_H);
-        }
-
-        SDL_RenderSetViewport(renderer, NULL);
-
-        if (bg.finJeu)
-            afficherWinMessage(&bg, renderer, SCREEN_W, SCREEN_H);
-
-        if (ks[SDL_SCANCODE_G] && guideTex)
-            SDL_RenderCopy(renderer, guideTex, NULL, NULL);
-
-        SDL_RenderPresent(renderer);
-        SDL_Delay(16);
-    }
-
-    if (guideTex)
-        SDL_DestroyTexture(guideTex);
-
-    saveScore(bg.score);
-
-    SDL_DestroyRenderer(renderer);
-    SDL_DestroyWindow(win);
-
+void cleanup(Game *g) {
+    if (g->gameplayInitialized) gpDestroy(&g->gameplay);
+    mmDestroy(&g->mainMenu);
+    omDestroy(&g->optionsMenu);
+    SDL_DestroyRenderer(g->renderer);
+    SDL_DestroyWindow(g->window);
+    Mix_CloseAudio();
     IMG_Quit();
     SDL_Quit();
+}
 
+int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
+    
+    Game game = {0};
+    game.gameplayInitialized = 0;
+    game.windowFocused = 1;
+    
+    if (!initSDL(&game)) return 1;
+    
+    initStateManager(&game.state);
+    mmInit(&game.mainMenu, game.renderer);
+    omInit(&game.optionsMenu, game.renderer);
+    
+    int running = 1;
+    
+    while (running && game.state.current != STATE_EXIT) {
+        SDL_Event e;
+        
+        while (SDL_PollEvent(&e)) {
+            if (e.type == SDL_QUIT) {
+                running = 0;
+                break;
+            }
+            
+            if (e.type == SDL_WINDOWEVENT) {
+                switch (e.window.event) {
+                    case SDL_WINDOWEVENT_FOCUS_GAINED:
+                        game.windowFocused = 1;
+                        break;
+                    case SDL_WINDOWEVENT_FOCUS_LOST:
+                        game.windowFocused = 1;
+                        break;
+                }
+            }
+            
+            switch (game.state.current) {
+                case STATE_MAIN_MENU:
+                    mmHandleEvent(&game.mainMenu, game.window, &e);
+                    break;
+                case STATE_OPTIONS:
+                    omHandleEvent(&game.optionsMenu, game.window, &e);
+                    break;
+                case STATE_GAMEPLAY:
+                    if (game.gameplayInitialized) {
+                        gpHandleEvent(&game.gameplay, game.window, &e, &game.state);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+        
+        if (game.mainMenu.requested_state != -1) {
+            changeState(&game.state, game.mainMenu.requested_state);
+            
+            if (game.state.current == STATE_GAMEPLAY && !game.gameplayInitialized) {
+                gpInit(&game.gameplay, game.renderer);
+                game.gameplayInitialized = 1;
+            }
+            
+            game.mainMenu.requested_state = -1;
+        }
+        
+        if (game.optionsMenu.requested_state != -1) {
+            changeState(&game.state, game.optionsMenu.requested_state);
+            game.optionsMenu.requested_state = -1;
+        }
+        
+        if (game.gameplayInitialized && game.gameplay.saveMenu.requested_state != -1) {
+            if (game.gameplay.saveMenu.requested_state == STATE_MAIN_MENU) {
+                changeState(&game.state, STATE_MAIN_MENU);
+                game.gameplay.isPaused = 0;
+            } else if (game.gameplay.saveMenu.requested_state == STATE_GAMEPLAY) {
+                game.gameplay.isPaused = 0;
+            }
+            game.gameplay.saveMenu.requested_state = -1;
+        }
+        
+        if (game.state.current == STATE_GAMEPLAY && game.gameplayInitialized) {
+            gpUpdate(&game.gameplay);
+        }
+        
+        SDL_SetRenderDrawColor(game.renderer, 0, 0, 0, 255);
+        SDL_RenderClear(game.renderer);
+        
+        switch (game.state.current) {
+            case STATE_MAIN_MENU:
+                mmRender(&game.mainMenu, game.renderer, game.window);
+                break;
+            case STATE_OPTIONS:
+                omRender(&game.optionsMenu, game.renderer, game.window);
+                break;
+            case STATE_GAMEPLAY:
+                if (game.gameplayInitialized) {
+                    gpRender(&game.gameplay, game.renderer, game.window);
+                }
+                break;
+            default:
+                break;
+        }
+        
+        SDL_RenderPresent(game.renderer);
+        
+        SDL_Delay(16);
+    }
+    
+    cleanup(&game);
     return 0;
 }

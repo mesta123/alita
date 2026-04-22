@@ -1,0 +1,190 @@
+#include "level.h"
+#include "utils.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+static void levelInternalRender(LevelManager *lm, SDL_Renderer *r);
+static void levelInternalDestroy(LevelManager *lm);
+
+void levelManagerInit(LevelManager *lm, SDL_Renderer *r) {
+    lm->currentLevel = -1;
+    lm->cameraX = 0;
+    lm->cameraY = 0;
+    lm->shakeTimer = 0;
+    lm->shakeIntensity = 0;
+    
+    strcpy(lm->levels[0].bgFile, "lvl1.jpeg");
+    lm->levels[0].id = 0;
+    lm->levels[0].bgTexture = NULL;
+    lm->levels[0].collisionMap = NULL;
+}
+
+void levelManagerLoad(LevelManager *lm, SDL_Renderer *r, int levelId) {
+    if (levelId < 0 || levelId >= MAX_LEVELS) return;
+    
+    if (lm->currentLevel >= 0) {
+        Level *old = &lm->levels[lm->currentLevel];
+        if (old->bgTexture) SDL_DestroyTexture(old->bgTexture);
+        if (old->collisionMap) SDL_FreeSurface(old->collisionMap);
+        old->bgTexture = NULL;
+        old->collisionMap = NULL;
+    }
+    
+    Level *lvl = &lm->levels[levelId];
+    
+    const char* paths[] = {
+        "lvl1.jpeg",
+        "./lvl1.jpeg", 
+        "../lvl1.jpeg",
+        "img/lvl1.jpeg",
+        "/home/rahma0/Downloads/options/lvl1.jpeg",
+        NULL
+    };
+    
+    lvl->bgTexture = NULL;
+    
+    printf("\n=== Chargement niveau %d ===\n", levelId);
+    
+    for (int i = 0; paths[i] != NULL; i++) {
+        printf("Essai %d: '%s' -> ", i+1, paths[i]);
+        lvl->bgTexture = IMG_LoadTexture(r, paths[i]);
+        if (lvl->bgTexture) {
+            printf("SUCCES!\n");
+            break;
+        } else {
+            printf("ECHEC\n");
+        }
+    }
+    
+    if (!lvl->bgTexture) {
+        printf("!!! AUCUNE IMAGE TROUVEE - Creation fond noir !!!\n");
+        
+        lvl->bgTexture = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888,
+                                          SDL_TEXTUREACCESS_TARGET, 1280, 720);
+        if (lvl->bgTexture) {
+            SDL_SetTextureBlendMode(lvl->bgTexture, SDL_BLENDMODE_NONE);
+            SDL_SetRenderTarget(r, lvl->bgTexture);
+            SDL_SetRenderDrawColor(r, 20, 20, 40, 255);
+            SDL_RenderClear(r);
+            SDL_SetRenderTarget(r, NULL);
+        }
+        
+        lvl->width = 1280;
+        lvl->height = 720;
+    } else {
+        SDL_QueryTexture(lvl->bgTexture, NULL, NULL, &lvl->width, &lvl->height);
+        printf("Image chargee: %dx%d\n", lvl->width, lvl->height);
+    }
+    
+    lm->cameraX = 0;
+    lm->cameraY = 0;
+    
+    lm->currentLevel = levelId;
+    printf("Camera initialisee: %d,%d\n", lm->cameraX, lm->cameraY);
+    printf("=== FIN ===\n\n");
+}
+
+static void levelInternalRender(LevelManager *lm, SDL_Renderer *r) {
+    if (lm->currentLevel < 0) return;
+    Level *lvl = &lm->levels[lm->currentLevel];
+    
+    if (lvl->bgTexture) {
+        SDL_Rect src = {
+            lm->cameraX,
+            lm->cameraY,
+            1280,
+            720
+        };
+        
+        SDL_Rect dst = {0, 0, 1280, 720};
+        
+        if (src.x + src.w > lvl->width) src.x = lvl->width - src.w;
+        if (src.y + src.h > lvl->height) src.y = lvl->height - src.h;
+        if (src.x < 0) src.x = 0;
+        if (src.y < 0) src.y = 0;
+        
+        if (lvl->width < 1280) {
+            src.w = lvl->width;
+            src.x = 0;
+        }
+        if (lvl->height < 720) {
+            src.h = lvl->height;
+            src.y = 0;
+        }
+        
+        SDL_RenderCopy(r, lvl->bgTexture, &src, &dst);
+    } else {
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+    }
+}
+
+void levelManagerRender(LevelManager *lm, SDL_Renderer *r) {
+    levelInternalRender(lm, r);
+}
+
+static void levelInternalDestroy(LevelManager *lm) {
+    for (int i = 0; i < MAX_LEVELS; i++) {
+        if (lm->levels[i].bgTexture) {
+            SDL_DestroyTexture(lm->levels[i].bgTexture);
+            lm->levels[i].bgTexture = NULL;
+        }
+        if (lm->levels[i].collisionMap) {
+            SDL_FreeSurface(lm->levels[i].collisionMap);
+            lm->levels[i].collisionMap = NULL;
+        }
+    }
+}
+
+void levelManagerDestroy(LevelManager *lm) {
+    levelInternalDestroy(lm);
+}
+
+void levelSwitchTo(LevelManager *lm, SDL_Renderer *r, int levelId) {
+    levelManagerLoad(lm, r, levelId);
+}
+
+int levelGetCurrentId(LevelManager *lm) {
+    return lm->currentLevel;
+}
+
+int levelCheckPixelCollision(LevelManager *lm, int x, int y) { 
+    (void)lm; (void)x; (void)y;
+    return 0; 
+}
+
+void levelResolvePlayerCollision(LevelManager *lm, Player *player) {
+    (void)lm; (void)player;
+    player->onGround = 0;
+}
+
+void levelTriggerShake(LevelManager *lm, int intensity, int duration) {
+    lm->shakeIntensity = intensity;
+    lm->shakeTimer = duration;
+}
+
+void levelManagerUpdate(LevelManager *lm, Player *player) {
+    if (lm->currentLevel < 0) return;
+    Level *lvl = &lm->levels[lm->currentLevel];
+    
+    int targetCamX = (int)player->x - 640 + PLAYER_WIDTH/2;
+    int targetCamY = (int)player->y - 360 + PLAYER_HEIGHT/2;
+    
+    if (targetCamX < 0) targetCamX = 0;
+    if (targetCamY < 0) targetCamY = 0;
+    if (targetCamX > lvl->width - 1280) targetCamX = lvl->width - 1280;
+    if (targetCamY > lvl->height - 720) targetCamY = lvl->height - 720;
+    
+    if (lvl->width < 1280) targetCamX = 0;
+    if (lvl->height < 720) targetCamY = 0;
+    
+    lm->cameraX = (int)lerp(lm->cameraX, targetCamX, 0.1f);
+    lm->cameraY = (int)lerp(lm->cameraY, targetCamY, 0.1f);
+    
+    if (lm->shakeTimer > 0) {
+        lm->shakeTimer--;
+        lm->cameraX += (rand() % (lm->shakeIntensity * 2 + 1)) - lm->shakeIntensity;
+        lm->cameraY += (rand() % (lm->shakeIntensity * 2 + 1)) - lm->shakeIntensity;
+    }
+}

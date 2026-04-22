@@ -1,0 +1,190 @@
+#include "minimap.h"
+#include <stdio.h>
+
+#define MINIMAP_OFFSET_DISTANCE 115
+
+void minimapInit(Minimap *mm, SDL_Renderer *r, LevelManager *lm) {
+    (void)r;
+    (void)lm;
+    
+    mm->position.x = 0;
+    mm->position.y = 0;
+    mm->position.w = MINIMAP_WIDTH;
+    mm->position.h = MINIMAP_HEIGHT;
+    
+    mm->visible = 1;
+    mm->scaleX = 1.0f;
+    mm->scaleY = 1.0f;
+    mm->viewX = 0;
+    mm->viewY = 0;
+    
+    printf("Minimap INIT: distance %dpx (3cm)\n", MINIMAP_OFFSET_DISTANCE);
+}
+
+void minimapSetLevel(Minimap *mm, LevelManager *lm) {
+    if (lm->currentLevel < 0) return;
+    
+    Level *lvl = &lm->levels[lm->currentLevel];
+    
+    mm->scaleX = (float)MINIMAP_WIDTH / (float)lvl->width;
+    mm->scaleY = (float)MINIMAP_HEIGHT / (float)lvl->height;
+    
+    if (mm->scaleX > mm->scaleY) mm->scaleX = mm->scaleY;
+    else mm->scaleY = mm->scaleX;
+    
+    printf("Minimap SCALE: %.3fx%.3f\n", mm->scaleX, mm->scaleY);
+}
+
+void minimapUpdate(Minimap *mm, SDL_Renderer *r, LevelManager *lm,
+                   Player *player, PlatformManager *pm) {
+    (void)r;
+    (void)lm;
+    (void)pm;
+    
+    if (!mm->visible) return;
+    
+    int offsetX = (int)(MINIMAP_OFFSET_DISTANCE * 0.7f);
+    int offsetY = (int)(MINIMAP_OFFSET_DISTANCE * 0.7f);
+    
+    int playerScreenX = (int)(player->x - lm->cameraX);
+    int playerScreenY = (int)(player->y - lm->cameraY);
+    
+    mm->position.x = playerScreenX + offsetX;
+    mm->position.y = playerScreenY - MINIMAP_HEIGHT - offsetY;
+    
+    if (mm->position.x + MINIMAP_WIDTH > 1280 - 20) {
+        mm->position.x = playerScreenX - MINIMAP_WIDTH - offsetX;
+    }
+    if (mm->position.y < 20) {
+        mm->position.y = playerScreenY + offsetY;
+    }
+    if (mm->position.y + MINIMAP_HEIGHT > 720 - 20) {
+        mm->position.y = playerScreenY - MINIMAP_HEIGHT - offsetY;
+    }
+    if (mm->position.x < 20) {
+        mm->position.x = 20;
+    }
+    
+    if (mm->position.x < 20) mm->position.x = 20;
+    if (mm->position.x > 1280 - MINIMAP_WIDTH - 20) mm->position.x = 1280 - MINIMAP_WIDTH - 20;
+    if (mm->position.y < 20) mm->position.y = 20;
+    if (mm->position.y > 720 - MINIMAP_HEIGHT - 20) mm->position.y = 720 - MINIMAP_HEIGHT - 20;
+    
+    Level *lvl = &lm->levels[lm->currentLevel];
+    mm->viewX = (int)(player->x + PLAYER_WIDTH/2) - (MINIMAP_WIDTH / 2);
+    mm->viewY = (int)(player->y + PLAYER_HEIGHT/2) - (MINIMAP_HEIGHT / 2);
+    
+    if (mm->viewX < 0) mm->viewX = 0;
+    if (mm->viewY < 0) mm->viewY = 0;
+    if (mm->viewX > lvl->width - MINIMAP_WIDTH) 
+        mm->viewX = lvl->width - MINIMAP_WIDTH;
+    if (mm->viewY > lvl->height - MINIMAP_HEIGHT) 
+        mm->viewY = lvl->height - MINIMAP_HEIGHT;
+    
+    if (lvl->width < MINIMAP_WIDTH) mm->viewX = 0;
+    if (lvl->height < MINIMAP_HEIGHT) mm->viewY = 0;
+}
+
+void minimapRender(Minimap *mm, SDL_Renderer *r, LevelManager *lm,
+                   Player *player, PlatformManager *pm) {
+    if (!mm->visible || !r || lm->currentLevel < 0) return;
+    
+    Level *lvl = &lm->levels[lm->currentLevel];
+    
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 200);
+    SDL_RenderFillRect(r, &mm->position);
+    
+    SDL_SetRenderDrawColor(r, 0, 255, 0, 255);
+    for (int i = 0; i < 2; i++) {
+        SDL_Rect b = {
+            mm->position.x + i,
+            mm->position.y + i,
+            MINIMAP_WIDTH - 2*i,
+            MINIMAP_HEIGHT - 2*i
+        };
+        SDL_RenderDrawRect(r, &b);
+    }
+    
+    SDL_Rect inner = {
+        mm->position.x + 2,
+        mm->position.y + 2,
+        MINIMAP_WIDTH - 4,
+        MINIMAP_HEIGHT - 4
+    };
+    
+    if (lvl->bgTexture) {
+        SDL_Rect src = {
+            mm->viewX,
+            mm->viewY,
+            MINIMAP_WIDTH,
+            MINIMAP_HEIGHT
+        };
+        
+        if (src.x < 0) src.x = 0;
+        if (src.y < 0) src.y = 0;
+        if (src.x + src.w > lvl->width) src.x = lvl->width - src.w;
+        if (src.y + src.h > lvl->height) src.y = lvl->height - src.h;
+        
+        SDL_RenderCopy(r, lvl->bgTexture, &src, &inner);
+    }
+    
+    if (pm) {
+        for (int i = 0; i < pm->count; i++) {
+            Platform *p = &pm->platforms[i];
+            if (!p->active) continue;
+            
+            int relX = (int)(p->rect.x - mm->viewX);
+            int relY = (int)(p->rect.y - mm->viewY);
+            
+            int px = inner.x + (int)(relX * mm->scaleX);
+            int py = inner.y + (int)(relY * mm->scaleY);
+            int pw = (int)(p->rect.w * mm->scaleX);
+            int ph = (int)(p->rect.h * mm->scaleY);
+            
+            if (pw < 3) pw = 3;
+            if (ph < 3) ph = 3;
+            
+            if (px + pw < inner.x || px > inner.x + inner.w ||
+                py + ph < inner.y || py > inner.y + inner.h) {
+                continue;
+            }
+            
+            SDL_Rect mp = {px, py, pw, ph};
+            
+            if (p->type == PLATFORM_DESTRUCTIBLE)
+                SDL_SetRenderDrawColor(r, 255, 80, 80, 255);
+            else if (p->type == PLATFORM_MOVING_H)
+                SDL_SetRenderDrawColor(r, 80, 200, 255, 255);
+            else
+                SDL_SetRenderDrawColor(r, 200, 200, 200, 255);
+                
+            SDL_RenderFillRect(r, &mp);
+        }
+    }
+    
+    int playerRelX = (int)(player->x + PLAYER_WIDTH/2 - mm->viewX);
+    int playerRelY = (int)(player->y + PLAYER_HEIGHT/2 - mm->viewY);
+    
+    int jx = inner.x + (int)(playerRelX * mm->scaleX) - 6;
+    int jy = inner.y + (int)(playerRelY * mm->scaleY) - 6;
+    
+    SDL_Rect mj = {jx, jy, 12, 12};
+    
+    SDL_SetRenderDrawColor(r, 0, 255, 0, 255);
+    SDL_RenderFillRect(r, &mj);
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 255);
+    SDL_RenderDrawRect(r, &mj);
+    
+    SDL_Rect center = {jx + 4, jy + 4, 4, 4};
+    SDL_SetRenderDrawColor(r, 255, 0, 0, 255);
+    SDL_RenderFillRect(r, &center);
+}
+
+void minimapToggle(Minimap *mm) {
+    mm->visible = !mm->visible;
+    printf("Minimap: %s\n", mm->visible ? "ON" : "OFF");
+}
+
+void minimapDestroy(Minimap *mm) {
+    (void)mm;
+}
