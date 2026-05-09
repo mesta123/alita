@@ -1,7 +1,7 @@
-game: main.o ennemi.o
-	gcc main.o ennemi.o -o game -lSDL2 -lSDL2_image -lSDL2_ttf -lSDL2_mixer 
-main.o: main.c ennemi.h 
+enigme: main.o enigme.o
+	gcc main.o enigme.o -o enigme -lSDL2 -lSDL2_image -lSDL2_ttf -lSDL2_mixer 
+main.o: main.c enigme.h 
 	gcc -c main.c 
-ennemi.o: ennemi.c ennemi.h 
-	gcc -c ennemi.c
+enigme.o: enigme.c enigme.h 
+	gcc -c enigme.c
 
